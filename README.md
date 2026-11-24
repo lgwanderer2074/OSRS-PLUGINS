@@ -1,6 +1,6 @@
 # Inventory to Tab
 
-A RuneLite development plugin that saves your inventory arrangement and optionally your equipped gear into a Bank Tag tab you choose.
+A RuneLite plugin that saves your inventory arrangement and optionally your equipped gear into a Bank Tag tab you choose, then shows what to withdraw to restock that setup.
 
 ## Use it
 
@@ -26,13 +26,9 @@ Quantities are stored for your character and RuneLite profile. Resave an older l
 
 **Later additions:** Core Bank Tags can put newly tagged items or newly banked potion variants into saved empty spaces on a later opening. This version copies the current arrangement; it does not lock the layout against future changes. Save the inventory again to rebuild its block.
 
-## Run the development client
+## Development
 
-This is a source project, version **0.3.0**. Use the development launcher below to try it.
-
-**On the Mac where this project was prepared:** open the sibling `Launch Inventory to Tab.command` file in Finder and double-click it. It uses the local build JDK and Gradle cache already prepared for this project. Leave its Terminal window open while the client is running. Close the development client and run the launcher again after code changes.
-
-The steps below also work when setting the project up on another computer.
+Version **0.4.0**. To run it from source:
 
 1. Install a JDK compatible with the Gradle wrapper; **JDK 17** was used for this build. The compiled plugin targets Java 11.
 2. Open this folder as a Gradle project in IntelliJ IDEA, or use a terminal.
@@ -46,7 +42,7 @@ The steps below also work when setting the project up on another computer.
 
 For a Jagex Account, follow RuneLite's [development-client login guide](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts). The official [Plugin Hub development guide](https://github.com/runelite/plugin-hub#creating-new-plugins) explains the general setup.
 
-## Build and test
+### Build and test
 
 ```sh
 ./gradlew test build
@@ -54,20 +50,17 @@ For a Jagex Account, follow RuneLite's [development-client login guide](https://
 
 The source uses RuneLite's current `latest.release` dependency, as the official template recommends. Development APIs can change, so rebuilding against a future release may require an update. The JAR is written under `build/libs/`.
 
-## Verification
+### Verification
 
-The tests cover both layout modes, restock quantities and shortfalls, exact potion doses, equipped stack counts, and changes to the saved layout. The build targets Java 11 and was run with JDK 17.
+The unit tests cover both layout modes, restock quantities and shortfalls, exact potion doses, equipped stack counts, and changes to the saved layout. Saving, overwrite confirmation, the restock panel, Show/Hide restock list, and bank highlights have been checked in a logged-in game session. [MANUAL_TESTS.md](MANUAL_TESTS.md) lists the full in-game checklist.
 
-An independent source review checked the current core Bank Tags menu, tag membership, potion-variant handling and profile behavior. Live bank interaction has **not** been tested in a logged-in game session.
+### Code map
 
-Version 0.1.1 also passed a macOS startup check: the client showed its window and logged that Inventory to Tab was running. This fixes the initial Bank Tags service injection and modern Java macOS UI access issues. A successful startup does not establish in-game bank behavior.
-
-Before considering a Plugin Hub submission, use the checklist in [MANUAL_TESTS.md](MANUAL_TESTS.md). Publication and review are separate steps from this local prototype.
-
-## Code map
-
-- `src/main/java/com/inventorytotab/InventoryToTabPlugin.java` — tab context menu, inventory capture, Bank Tags integration and Undo.
+- `src/main/java/com/inventorytotab/InventoryToTabPlugin.java` — tab context menu, inventory capture, Bank Tags integration, restock refresh and Undo.
 - `src/main/java/com/inventorytotab/InventoryLayoutBuilder.java` — slot mapping and preservation of other items.
+- `src/main/java/com/inventorytotab/RestockTargets.java` — saved quantities and what is still needed.
+- `src/main/java/com/inventorytotab/RestockOverlay.java` — the Restock panel.
+- `src/main/java/com/inventorytotab/BankHighlightOverlay.java` — green bank outlines with amounts to withdraw.
 - `src/test/java/com/inventorytotab/InventoryLayoutBuilderTest.java` — layout regression tests.
 - `src/test/java/com/inventorytotab/InventoryToTabLauncher.java` — development-client launcher.
 

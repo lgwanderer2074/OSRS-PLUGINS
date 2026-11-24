@@ -131,7 +131,7 @@ public class InventoryToTabPlugin extends Plugin
 
 		addSaveOption(tag, event.getTarget(), false);
 		addSaveOption(tag, event.getTarget(), true);
-		client.createMenuEntry(-2)
+		client.getMenu().createMenuEntry(-2)
 			.setOption(restockHidden ? SHOW_RESTOCK_OPTION : HIDE_RESTOCK_OPTION)
 			.setTarget(event.getTarget())
 			.setType(MenuAction.RUNELITE)
@@ -139,7 +139,7 @@ public class InventoryToTabPlugin extends Plugin
 		LastSave previousSave = lastSave;
 		if (previousSave != null && previousSave.tag.equals(tag))
 		{
-			client.createMenuEntry(-2)
+			client.getMenu().createMenuEntry(-2)
 				.setOption(UNDO_OPTION)
 				.setTarget(event.getTarget())
 				.setType(MenuAction.RUNELITE)
@@ -149,7 +149,7 @@ public class InventoryToTabPlugin extends Plugin
 
 	private void addSaveOption(String tag, String target, boolean includeGear)
 	{
-		client.createMenuEntry(-2)
+		client.getMenu().createMenuEntry(-2)
 			.setOption(includeGear ? SAVE_GEAR_OPTION : SAVE_OPTION)
 			.setTarget(target)
 			.setType(MenuAction.RUNELITE)
