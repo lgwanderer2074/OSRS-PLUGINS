@@ -165,6 +165,52 @@ public class InventoryLayoutBuilderTest
 		InventoryLayoutBuilder.build(new int[29], null, null, null);
 	}
 
+	@Test
+	public void appendKeepsExistingLayoutAndAddsNewSetupBelowAGapRow()
+	{
+		int[] first = emptyInventory();
+		first[0] = 385;
+		int[] existing = InventoryLayoutBuilder.build(first, null, null, null);
+		int[] second = emptyInventory();
+		second[1] = 2434;
+
+		InventoryLayoutBuilder.Result result = InventoryLayoutBuilder.append(second, null, existing, new int[]{385, 2434});
+
+		// The first setup only uses row 0, so the new block starts at row 2.
+		assertEquals(16, result.offset);
+		assertArrayEquals(Arrays.copyOf(existing, 16), Arrays.copyOf(result.layout, 16));
+		assertEquals(2434, result.layout[17]);
+		assertEquals(16 + InventoryLayoutBuilder.SNAPSHOT_SIZE, result.layout.length);
+	}
+
+	@Test
+	public void appendStacksBelowTheLastUsedRowIncludingGearAndExtras()
+	{
+		int[] inventory = emptyInventory();
+		inventory[27] = 4151;
+		int[] existing = InventoryLayoutBuilder.build(inventory, null, new int[]{995}, null);
+
+		InventoryLayoutBuilder.Result result = InventoryLayoutBuilder.append(emptyInventory(),
+			new int[]{-1, 1153, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1}, existing, new int[]{11840});
+
+		// Existing items end at cell 56 (row 7), so the new block starts at row 9.
+		assertEquals(72, result.offset);
+		assertArrayEquals(existing, Arrays.copyOf(result.layout, existing.length));
+		assertEquals(1153, result.layout[73]);
+		// Tagged items not placed anywhere follow the new block.
+		assertEquals(11840, result.layout[result.layout.length - 1]);
+	}
+
+	@Test
+	public void appendIntoEmptyLayoutStartsAtTheTop()
+	{
+		int[] inventory = emptyInventory();
+		inventory[0] = 385;
+		InventoryLayoutBuilder.Result result = InventoryLayoutBuilder.append(inventory, null, new int[]{-1, -1}, null);
+		assertEquals(0, result.offset);
+		assertEquals(385, result.layout[0]);
+	}
+
 	private static int[] emptyInventory()
 	{
 		int[] inventory = new int[28];

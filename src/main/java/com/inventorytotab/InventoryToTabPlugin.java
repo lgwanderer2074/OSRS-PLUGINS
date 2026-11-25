@@ -1,7 +1,6 @@
 package com.inventorytotab;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonParseException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -13,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.IntPredicate;
 import javax.inject.Inject;
 import net.runelite.api.ChatMessageType;
 import net.runelite.api.Client;
@@ -195,28 +195,36 @@ public class InventoryToTabPlugin extends Plugin
 		READY
 	}
 
-	private RestockTargets loadTargets(String tag)
+	private List<RestockTargets> loadSetups(String tag)
 	{
-		String raw = configManager.getRSProfileConfiguration(CONFIG_GROUP, restockKey(tag));
-		try
+		return RestockTargets.parse(gson, configManager.getRSProfileConfiguration(CONFIG_GROUP, restockKey(tag)));
+	}
+
+	/** Saved setups whose items are still where they were saved in the open tab, oldest first. */
+	private List<RestockTargets> matchingSetups(List<RestockTargets> setups, Layout active)
+	{
+		List<RestockTargets> matching = new ArrayList<>();
+		if (active != null)
 		{
-			return gson.fromJson(raw, RestockTargets.class);
+			for (RestockTargets setup : setups)
+			{
+				if (setup.matches(active.getLayout()))
+				{
+					matching.add(setup);
+				}
+			}
 		}
-		catch (JsonParseException ex)
-		{
-			return null;
-		}
+		return matching;
 	}
 
 	private RestockStatus restockStatus(String tag, Layout active)
 	{
-		RestockTargets targets = loadTargets(tag);
-		if (targets == null)
+		List<RestockTargets> setups = loadSetups(tag);
+		if (setups.isEmpty())
 		{
 			return RestockStatus.NOT_SAVED;
 		}
-		return active != null && targets.matches(active.getLayout())
-			? RestockStatus.READY : RestockStatus.LAYOUT_CHANGED;
+		return matchingSetups(setups, active).isEmpty() ? RestockStatus.LAYOUT_CHANGED : RestockStatus.READY;
 	}
 
 	private boolean isUserTab(String tag)
@@ -277,7 +285,7 @@ public class InventoryToTabPlugin extends Plugin
 		Layout previous = layoutManager.loadLayout(tag);
 		if (previous == null)
 		{
-			applySave(tag, null, slots, equipment, inventoryCounts, equipmentCounts);
+			applySave(tag, null, false, slots, equipment, inventoryCounts, equipmentCounts);
 			return;
 		}
 
@@ -285,8 +293,11 @@ public class InventoryToTabPlugin extends Plugin
 		long generation = undoGeneration;
 		String key = restockKey(tag);
 		String targetsAtPrompt = configManager.getRSProfileConfiguration(CONFIG_GROUP, key);
-		chatbox.openTextMenuInput("Replace the layout in '" + tag + "'?")
-			.option("Save setup", () -> clientThread.invoke(() ->
+		Runnable[] choice = new Runnable[2];
+		for (int mode = 0; mode < 2; mode++)
+		{
+			boolean append = mode == 0;
+			choice[mode] = () -> clientThread.invoke(() ->
 			{
 				Layout current = layoutManager.loadLayout(tag);
 				if (!isCurrentTab(tag, generation) || tabManager.find(tag) != tab || current == null
@@ -296,13 +307,22 @@ public class InventoryToTabPlugin extends Plugin
 					message("The tab changed. Open it and try saving again.");
 					return;
 				}
-				applySave(tag, previous, slots, equipment, inventoryCounts, equipmentCounts);
-			}))
+				applySave(tag, previous, append, slots, equipment, inventoryCounts, equipmentCounts);
+			});
+		}
+		chatbox.openTextMenuInput("'" + tag + "' already has a layout.")
+			.option("Add below (keep existing setups)", choice[0])
+			.option("Replace all", choice[1])
 			.option("Cancel", () -> { })
 			.build();
 	}
 
-	private void applySave(String tag, Layout previous, int[] slots, int[] equipment,
+	/**
+	 * Saves the snapshot into the tab. With append, the existing layout stays exactly as it
+	 * was and the new setup goes underneath; otherwise the new setup takes the top of the tab
+	 * and becomes its only tracked setup.
+	 */
+	private void applySave(String tag, Layout previous, boolean append, int[] slots, int[] equipment,
 		Map<Integer, Long> inventoryCounts, Map<Integer, Long> equipmentCounts)
 	{
 		List<Integer> taggedItems = tagManager.getItemsForTag(tag);
@@ -332,11 +352,36 @@ public class InventoryToTabPlugin extends Plugin
 		}
 		int[] existingItems = visibleItems.stream().mapToInt(Integer::intValue).toArray();
 		int[] previousSlots = previous == null ? new int[0] : previous.getLayout();
-		Layout saved = new Layout(tag, InventoryLayoutBuilder.build(slots, equipment, previousSlots, existingItems));
-		int[] expectedLayout = saved.getLayout();
 		String key = restockKey(tag);
 		String previousTargets = configManager.getRSProfileConfiguration(CONFIG_GROUP, key);
-		String savedTargets = gson.toJson(new RestockTargets(expectedLayout, inventoryCounts, equipmentCounts));
+		List<RestockTargets> setups = new ArrayList<>();
+		int[] newLayout;
+		int offset;
+		if (append)
+		{
+			InventoryLayoutBuilder.Result result = InventoryLayoutBuilder.append(slots, equipment, previousSlots, existingItems);
+			newLayout = result.layout;
+			offset = result.offset;
+			// Earlier setups keep tracking as long as their items are still where they were saved.
+			for (RestockTargets setup : RestockTargets.parse(gson, previousTargets))
+			{
+				if (setup.matches(newLayout))
+				{
+					setups.add(setup);
+				}
+			}
+		}
+		else
+		{
+			newLayout = InventoryLayoutBuilder.build(slots, equipment, previousSlots, existingItems);
+			offset = 0;
+		}
+		int[] block = Arrays.copyOfRange(newLayout, offset, offset + InventoryLayoutBuilder.SNAPSHOT_SIZE);
+		setups.add(new RestockTargets(block, offset, inventoryCounts, equipmentCounts));
+		int setupNumber = setups.size();
+		Layout saved = new Layout(tag, newLayout);
+		int[] expectedLayout = saved.getLayout();
+		String savedTargets = RestockTargets.write(gson, setups);
 
 		Set<Integer> snapshotIds = new LinkedHashSet<>(inventoryCounts.keySet());
 		snapshotIds.addAll(equipmentCounts.keySet());
@@ -360,7 +405,8 @@ public class InventoryToTabPlugin extends Plugin
 		lastSave = new LastSave(tag, () -> undo(tag, previous, expectedLayout, addedTags, generation,
 			key, previousTargets, savedTargets));
 		restockDirty = true;
-		message("Setup saved to '" + tag + "'. Right-click the tab to undo.");
+		message((setupNumber > 1 ? "Setup " + setupNumber + " added below in '" : "Setup saved to '")
+			+ tag + "'. Right-click the tab to undo.");
 	}
 
 	private int captureItem(ItemContainer container, int slot, Map<Integer, Long> counts)
@@ -484,17 +530,40 @@ public class InventoryToTabPlugin extends Plugin
 			return;
 		}
 
-		RestockTargets targets = loadTargets(tag);
-		if (targets == null || !targets.matches(active.getLayout()))
+		List<RestockTargets> setups = loadSetups(tag);
+		List<RestockTargets> matching = matchingSetups(setups, active);
+		if (matching.isEmpty())
 		{
 			clearRestock();
 			return;
 		}
 
-		List<RestockTargets.Need> needs = targets.calculate(countItems(InventoryID.INV, targets),
-			countItems(InventoryID.WORN, targets), countItems(InventoryID.BANK, targets));
+		Map<Integer, Long> carried = countItems(InventoryID.INV, id -> true);
+		Map<Integer, Long> worn = countItems(InventoryID.WORN, id -> true);
+		Map<Integer, Long> held = new LinkedHashMap<>(carried);
+		worn.forEach((id, quantity) -> held.merge(id, quantity, Long::sum));
+
+		// Track the setup the player's current items look most like; on a tie, the newest one.
+		RestockTargets targets = matching.get(matching.size() - 1);
+		double best = -1;
+		for (RestockTargets setup : matching)
+		{
+			double score = setup.similarity(held);
+			if (score >= best)
+			{
+				best = score;
+				targets = setup;
+			}
+		}
+
+		RestockTargets chosen = targets;
+		List<RestockTargets.Need> needs = chosen.calculate(carried, worn,
+			countItems(InventoryID.BANK, chosen::includes));
+		String title = setups.size() > 1
+			? "Restock: setup " + (setups.indexOf(chosen) + 1) + " of " + setups.size()
+			: "Restock";
 		bankHighlightOverlay.update(needs);
-		restockOverlay.update(needs);
+		restockOverlay.update(needs, title);
 	}
 
 	private void clearRestock()
@@ -503,7 +572,7 @@ public class InventoryToTabPlugin extends Plugin
 		bankHighlightOverlay.clear();
 	}
 
-	private Map<Integer, Long> countItems(int containerId, RestockTargets targets)
+	private Map<Integer, Long> countItems(int containerId, IntPredicate wanted)
 	{
 		Map<Integer, Long> counts = new LinkedHashMap<>();
 		ItemContainer container = client.getItemContainer(containerId);
@@ -515,7 +584,7 @@ public class InventoryToTabPlugin extends Plugin
 					&& itemManager.getItemComposition(item.getId()).getPlaceholderTemplateId() == -1)
 				{
 					int id = itemManager.canonicalize(item.getId());
-					if (targets.includes(id))
+					if (wanted.test(id))
 					{
 						counts.merge(id, (long) item.getQuantity(), Long::sum);
 					}

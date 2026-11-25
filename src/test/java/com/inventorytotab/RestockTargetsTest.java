@@ -1,5 +1,6 @@
 package com.inventorytotab;
 
+import com.google.gson.Gson;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,55 @@ public class RestockTargetsTest
 		assertTrue(targets.matches(reopenedLayout));
 		reopenedLayout[4] = PRAYER_POTION_3;
 		assertFalse(targets.matches(reopenedLayout));
+	}
+
+	@Test
+	public void matchesASetupSavedLowerInTheTabAtItsOffset()
+	{
+		int[] block = emptyLayout();
+		block[0] = PRAYER_POTION_4;
+		RestockTargets lower = new RestockTargets(block, 64, Map.of(PRAYER_POTION_4, 1L), Map.of());
+		int[] tab = new int[64 + InventoryLayoutBuilder.SNAPSHOT_SIZE];
+		Arrays.fill(tab, -1);
+		tab[64] = PRAYER_POTION_4;
+
+		assertTrue(lower.matches(tab));
+		tab[64] = ARROWS;
+		assertFalse(lower.matches(tab));
+	}
+
+	@Test
+	public void similarityPrefersTheSetupClosestToWhatThePlayerHolds()
+	{
+		RestockTargets potions = new RestockTargets(emptyLayout(), Map.of(PRAYER_POTION_4, 6L), Map.of());
+		RestockTargets arrows = new RestockTargets(emptyLayout(), Map.of(ARROWS, 100L), Map.of());
+		Map<Integer, Long> held = Map.of(PRAYER_POTION_4, 2L);
+
+		assertTrue(potions.similarity(held) > arrows.similarity(held));
+		assertEquals(0.0, arrows.similarity(held), 0.0);
+		assertEquals(1.0, potions.similarity(Map.of(PRAYER_POTION_4, 6L)), 0.0);
+	}
+
+	@Test
+	public void savesAndLoadsSeveralSetupsAndReadsOlderSingleSetupRecords()
+	{
+		Gson gson = new Gson();
+		RestockTargets first = new RestockTargets(emptyLayout(), Map.of(PRAYER_POTION_4, 6L), Map.of());
+		RestockTargets second = new RestockTargets(emptyLayout(), 64, Map.of(ARROWS, 100L), Map.of(ARROWS, 50L));
+
+		List<RestockTargets> loaded = RestockTargets.parse(gson, RestockTargets.write(gson, List.of(first, second)));
+		assertEquals(2, loaded.size());
+		assertEquals(0, loaded.get(0).offset());
+		assertEquals(64, loaded.get(1).offset());
+		assertTrue(loaded.get(1).includes(ARROWS));
+
+		List<RestockTargets> legacy = RestockTargets.parse(gson, gson.toJson(first));
+		assertEquals(1, legacy.size());
+		assertEquals(0, legacy.get(0).offset());
+		assertTrue(legacy.get(0).includes(PRAYER_POTION_4));
+
+		assertTrue(RestockTargets.parse(gson, null).isEmpty());
+		assertTrue(RestockTargets.parse(gson, "not json {").isEmpty());
 	}
 
 	private static int[] emptyLayout()

@@ -10,7 +10,7 @@ final class InventoryLayoutBuilder
 	private static final int INVENTORY_SIZE = 28;
 	private static final int INVENTORY_COLUMNS = 4;
 	private static final int EQUIPMENT_COLUMNS = 3;
-	private static final int BANK_COLUMNS = 8;
+	static final int BANK_COLUMNS = 8;
 	static final int SNAPSHOT_SIZE = 56;
 	private static final int EMPTY_ITEM = -1;
 
@@ -18,13 +18,24 @@ final class InventoryLayoutBuilder
 	{
 	}
 
+	/** A built tab layout plus the cell where the new setup's block starts. */
+	static final class Result
+	{
+		final int[] layout;
+		final int offset;
+
+		private Result(int[] layout, int offset)
+		{
+			this.layout = layout;
+			this.offset = offset;
+		}
+	}
+
 	/**
-	 * Uses seven bank rows for the snapshot. With equipment, the inventory moves
+	 * Builds the seven-row block for one setup. With equipment, the inventory moves
 	 * to the right and the equipment panel occupies the left three columns.
-	 * Existing items outside the snapshot follow below in their previous order.
-	 * Previous layouts and tagged item lists may be null when no data is saved.
 	 */
-	static int[] build(int[] inventory28, int[] equipmentPanel, int[] previousLayout, int[] existingTaggedItems)
+	static int[] block(int[] inventory28, int[] equipmentPanel)
 	{
 		Objects.requireNonNull(inventory28, "inventory28");
 		if (inventory28.length != INVENTORY_SIZE)
@@ -48,30 +59,70 @@ final class InventoryLayoutBuilder
 				layout[position] = equipmentPanel[slot];
 			}
 		}
+		return layout;
+	}
 
-		Set<Integer> snapshotItems = new LinkedHashSet<>();
+	/**
+	 * Replaces the tab with one setup at the top. Existing items outside the new block
+	 * follow below in their previous order. Previous layouts and tagged item lists may
+	 * be null when no data is saved.
+	 */
+	static int[] build(int[] inventory28, int[] equipmentPanel, int[] previousLayout, int[] existingTaggedItems)
+	{
+		return withExtras(block(inventory28, equipmentPanel), previousLayout, existingTaggedItems);
+	}
+
+	/**
+	 * Keeps the previous layout exactly as it is and adds the new setup underneath,
+	 * leaving one empty row between them. Tagged items that are not placed anywhere
+	 * go after the new block so Bank Tags does not drop them into its empty slots.
+	 */
+	static Result append(int[] inventory28, int[] equipmentPanel, int[] previousLayout, int[] existingTaggedItems)
+	{
+		int[] newBlock = block(inventory28, equipmentPanel);
+		int[] previous = previousLayout == null ? new int[0] : previousLayout;
+		int lastUsed = -1;
+		for (int slot = 0; slot < previous.length; slot++)
+		{
+			if (previous[slot] >= 0)
+			{
+				lastUsed = slot;
+			}
+		}
+		int offset = lastUsed < 0 ? 0 : (lastUsed / BANK_COLUMNS + 2) * BANK_COLUMNS;
+
+		int[] combined = new int[offset + SNAPSHOT_SIZE];
+		Arrays.fill(combined, EMPTY_ITEM);
+		System.arraycopy(previous, 0, combined, 0, Math.min(previous.length, offset));
+		System.arraycopy(newBlock, 0, combined, offset, SNAPSHOT_SIZE);
+		return new Result(withExtras(combined, null, existingTaggedItems), offset);
+	}
+
+	private static int[] withExtras(int[] layout, int[] previousLayout, int[] existingTaggedItems)
+	{
+		Set<Integer> placed = new LinkedHashSet<>();
 		for (int itemId : layout)
 		{
 			if (itemId >= 0)
 			{
-				snapshotItems.add(itemId);
+				placed.add(itemId);
 			}
 		}
 
 		Set<Integer> extras = new LinkedHashSet<>();
-		addExtras(previousLayout, snapshotItems, extras);
-		addExtras(existingTaggedItems, snapshotItems, extras);
+		addExtras(previousLayout, placed, extras);
+		addExtras(existingTaggedItems, placed, extras);
 
-		layout = Arrays.copyOf(layout, SNAPSHOT_SIZE + extras.size());
-		int position = SNAPSHOT_SIZE;
+		int[] result = Arrays.copyOf(layout, layout.length + extras.size());
+		int position = layout.length;
 		for (int itemId : extras)
 		{
-			layout[position++] = itemId;
+			result[position++] = itemId;
 		}
-		return layout;
+		return result;
 	}
 
-	private static void addExtras(int[] items, Set<Integer> snapshotItems, Set<Integer> extras)
+	private static void addExtras(int[] items, Set<Integer> placed, Set<Integer> extras)
 	{
 		if (items == null)
 		{
@@ -79,7 +130,7 @@ final class InventoryLayoutBuilder
 		}
 		for (int itemId : items)
 		{
-			if (itemId >= 0 && !snapshotItems.contains(itemId))
+			if (itemId >= 0 && !placed.contains(itemId))
 			{
 				extras.add(itemId);
 			}
